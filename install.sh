@@ -41,10 +41,41 @@ fi
 
 section "Installing system dependencies"
 sudo apt-get update -y
+
+# Bookworm renamed `chromium-browser` to `chromium`. Try the new name first,
+# fall back to the old name for Bullseye / Buster.
+if apt-cache show chromium >/dev/null 2>&1; then
+  CHROMIUM_PKG="chromium"
+elif apt-cache show chromium-browser >/dev/null 2>&1; then
+  CHROMIUM_PKG="chromium-browser"
+else
+  die "Neither 'chromium' nor 'chromium-browser' is available in apt. Update your sources."
+fi
+info "Chromium package: ${CHROMIUM_PKG}"
+
+# Codec package follows the same rename on most images.
+CODEC_PKG=""
+if apt-cache show chromium-codecs-ffmpeg-extra >/dev/null 2>&1; then
+  CODEC_PKG="chromium-codecs-ffmpeg-extra"
+elif apt-cache show "${CHROMIUM_PKG}-l10n" >/dev/null 2>&1; then
+  CODEC_PKG=""  # Bookworm bundles codecs in the main chromium package
+fi
+
+# `seat` group ships with seatd on Bookworm; libseat1 is the runtime.
 sudo apt-get install -y --no-install-recommends \
-  cage chromium-browser chromium-codecs-ffmpeg-extra \
+  cage "${CHROMIUM_PKG}" ${CODEC_PKG} \
   seatd libseat1 libinput10 libdrm2 libgbm1 libegl1 libgles2 \
   fonts-noto-color-emoji ca-certificates curl
+
+# Resolve the actual installed binary name and record it for the config seed.
+if command -v chromium >/dev/null 2>&1; then
+  CHROMIUM_BIN="chromium"
+elif command -v chromium-browser >/dev/null 2>&1; then
+  CHROMIUM_BIN="chromium-browser"
+else
+  die "Chromium installed but neither 'chromium' nor 'chromium-browser' is on PATH."
+fi
+info "Chromium binary: ${CHROMIUM_BIN}"
 
 if ! command -v cargo &>/dev/null; then
   section "Installing Rust toolchain"
@@ -79,10 +110,14 @@ sudo systemctl start  seatd.service || true
 section "Seeding config"
 if [[ ! -f "$CONFIG_FILE" ]]; then
   mkdir -p "$CONFIG_DIR"
-  cp config.example.toml "$CONFIG_FILE"
-  info "Wrote ${CONFIG_FILE}"
+  # Substitute the resolved chromium binary name into the seeded config so the
+  # supervisor doesn't try to exec a non-existent `chromium-browser` on Bookworm.
+  sed -e "s|^chromium_binary.*|chromium_binary   = \"${CHROMIUM_BIN}\"|" \
+      config.example.toml > "$CONFIG_FILE"
+  info "Wrote ${CONFIG_FILE} (chromium_binary=${CHROMIUM_BIN})"
 else
   warn "Config exists; leaving as-is: ${CONFIG_FILE}"
+  warn "If Chromium fails to launch, set chromium_binary=\"${CHROMIUM_BIN}\" in ${CONFIG_FILE}"
 fi
 
 section "Configuring GPU memory split"

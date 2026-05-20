@@ -6,7 +6,7 @@ const DEFAULT_URL: &str = "https://photos.google.com/";
 
 const DEFAULT_MOBILE_UA: &str = "Mozilla/5.0 (Linux; Android 13; Pixel 5) AppleWebKit/537.36 Chrome/120 Mobile Safari/537.36";
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Config {
     pub browser:  BrowserConfig,
@@ -44,16 +44,6 @@ pub struct ScheduleConfig {
     pub off_time: String,
 }
 
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            browser:  BrowserConfig::default(),
-            display:  DisplayConfig::default(),
-            schedule: ScheduleConfig::default(),
-        }
-    }
-}
-
 impl Default for BrowserConfig {
     fn default() -> Self {
         let profile_dir = dirs::data_dir()
@@ -65,7 +55,7 @@ impl Default for BrowserConfig {
             url:               DEFAULT_URL.to_string(),
             user_agent:        DEFAULT_MOBILE_UA.to_string(),
             profile_dir,
-            chromium_binary:   "chromium-browser".to_string(),
+            chromium_binary:   "chromium".to_string(),
             extra_flags:       Vec::new(),
             reload_every_secs: 0,
             low_ram:           true,
@@ -124,7 +114,7 @@ mod tests {
         assert_eq!(b.url, "https://photos.google.com/");
         assert!(b.user_agent.contains("Pixel 5"),    "UA must spoof a mobile device");
         assert!(b.user_agent.contains("Mobile Safari"));
-        assert_eq!(b.chromium_binary, "chromium-browser");
+        assert_eq!(b.chromium_binary, "chromium");
         assert_eq!(b.reload_every_secs, 0);
         assert!(b.extra_flags.is_empty());
     }

@@ -135,7 +135,7 @@ Chromium opens straight to `photos.google.com`, which redirects to the Google lo
 url               = "https://photos.google.com/"
 user_agent        = "Mozilla/5.0 (Linux; Android 13; Pixel 5) AppleWebKit/537.36 Chrome/120 Mobile Safari/537.36"
 profile_dir       = "/home/pi/.local/share/pico-google-photos/profile"
-chromium_binary   = "chromium-browser"
+chromium_binary   = "chromium"          # Bookworm; use "chromium-browser" on Bullseye
 reload_every_secs = 0          # 0 = never; e.g. 3600 reloads hourly
 extra_flags       = []         # appended to Chromium args
 
@@ -169,7 +169,7 @@ off_time = "23:00"
 With every toggle on (factory default), the supervisor invokes Chromium with the canonical "headless Pi Zero kiosk" recipe:
 
 ```bash
-chromium-browser \
+chromium \
   --kiosk \
   --ozone-platform=wayland \
   --enable-features=UseOzonePlatform \
@@ -272,6 +272,44 @@ pico-google-photos/
     ├── compositor.rs       # spawn Cage + Chromium as a single child
     ├── display_power.rs    # vcgencmd display_power on/off
     └── schedule.rs         # on/off-time window with cross-midnight wrap
+```
+
+---
+
+## Troubleshooting
+
+### `E: Package 'chromium-browser' has no installation candidate`
+
+You are on **Raspberry Pi OS Bookworm**, which renamed the package to `chromium`. The installer in this repo handles that automatically — pull the latest `main` and rerun:
+
+```bash
+git pull
+./install.sh
+```
+
+If you are running the supervisor against an older config that still says `chromium_binary = "chromium-browser"`, the supervisor will detect the mismatch and fall back to `chromium` at runtime (a `WARN` is logged). To silence the warning, edit `~/.config/pico-google-photos/config.toml`:
+
+```toml
+chromium_binary = "chromium"   # Bookworm
+# chromium_binary = "chromium-browser"  # Bullseye / Buster
+```
+
+### Cage exits immediately with `seatd not running`
+
+```bash
+sudo systemctl enable --now seatd
+sudo usermod -aG seat,video,render,input "$USER"
+# log out, log back in, or reboot
+```
+
+### Black screen, but the service is running
+
+Confirm the Pi booted to console (not desktop):
+
+```bash
+sudo systemctl get-default     # should print: multi-user.target
+sudo systemctl set-default multi-user.target
+sudo reboot
 ```
 
 ---

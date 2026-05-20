@@ -2,7 +2,7 @@
 url               = "https://photos.google.com/"
 user_agent        = "Mozilla/5.0 (Linux; Android 13; Pixel 5) AppleWebKit/537.36 Chrome/120 Mobile Safari/537.36"
 profile_dir       = "/home/pi/.local/share/pico-google-photos/profile"
-chromium_binary   = "chromium-browser"
+chromium_binary   = "chromium"          # Bookworm; use "chromium-browser" on Bullseye
 reload_every_secs = 0
 extra_flags       = []
 
