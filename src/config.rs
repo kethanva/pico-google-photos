@@ -107,3 +107,40 @@ impl Config {
         Ok(cfg)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Defaults must remain tuned for Pi Zero 2 W (the lowest supported target).
+    // Bumping these requires an explicit decision — change the test in the same diff.
+    #[test]
+    fn defaults_target_pi_zero_2_w() {
+        let b = BrowserConfig::default();
+        assert!(b.app_mode,        "app_mode must default true (chromeless --app=URL)");
+        assert!(b.disable_gpu,     "disable_gpu must default true (software render — safest on Pi Zero)");
+        assert!(b.ephemeral_cache, "ephemeral_cache must default true (no SD-card writes)");
+        assert!(b.low_ram,         "low_ram must default true (process limits + small JS heap)");
+        assert_eq!(b.url, "https://photos.google.com/");
+        assert!(b.user_agent.contains("Pixel 5"),    "UA must spoof a mobile device");
+        assert!(b.user_agent.contains("Mobile Safari"));
+        assert_eq!(b.chromium_binary, "chromium-browser");
+        assert_eq!(b.reload_every_secs, 0);
+        assert!(b.extra_flags.is_empty());
+    }
+
+    #[test]
+    fn schedule_default_disabled() {
+        let s = ScheduleConfig::default();
+        assert!(!s.enabled);
+        assert_eq!(s.on_time,  "07:00");
+        assert_eq!(s.off_time, "23:00");
+    }
+
+    #[test]
+    fn display_default_is_cage() {
+        let d = DisplayConfig::default();
+        assert_eq!(d.compositor, "cage");
+        assert_eq!(d.cage_flags, vec!["-s"]);
+    }
+}
