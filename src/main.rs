@@ -88,10 +88,29 @@ async fn main() -> Result<()> {
                 Box::pin(std::future::pending::<()>())
             };
 
+        let schedule_fut: std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>> =
+            if let Some(w) = window {
+                Box::pin(async move {
+                    loop {
+                        sleep(Duration::from_secs(schedule::seconds_until_minute_boundary())).await;
+                        if !w.is_on_now() {
+                            break;
+                        }
+                    }
+                })
+            } else {
+                Box::pin(std::future::pending::<()>())
+            };
+
         tokio::select! {
             _ = session.wait() => {
                 warn!("session ended; restarting in 3s");
                 sleep(Duration::from_secs(3)).await;
+            }
+            _ = schedule_fut => {
+                info!("schedule window ended; shutting down session");
+                session.kill().await;
+                let _ = session.wait().await;
             }
             _ = reload_fut => {
                 info!("reload_every_secs elapsed; restarting session");
