@@ -1,0 +1,27 @@
+[browser]
+url               = "https://photos.google.com/"
+user_agent        = "Mozilla/5.0 (Linux; Android 13; Pixel 5) AppleWebKit/537.36 Chrome/120 Mobile Safari/537.36"
+profile_dir       = "/home/pi/.local/share/pico-google-photos/profile"
+chromium_binary   = "chromium-browser"
+reload_every_secs = 0
+extra_flags       = []
+
+# Tuning toggles — defaults target Pi Zero 2 W / Pi 3.
+# app_mode         = true  → launch via --app=URL (chromeless window, no address bar)
+# disable_gpu      = true  → --disable-gpu + --disable-software-rasterizer
+#                            (software-rendered; safest on Pi Zero/Pi 3 where GL drivers flake)
+# ephemeral_cache  = true  → --disk-cache-dir=/dev/null (no SD-card writes)
+# low_ram          = true  → process-per-site, renderer-process-limit=2, JS heap 128 MB
+app_mode        = true
+disable_gpu     = true
+ephemeral_cache = true
+low_ram         = true
+
+[display]
+compositor = "cage"
+cage_flags = ["-s"]
+
+[schedule]
+enabled  = false
+on_time  = "07:00"
+off_time = "23:00"
