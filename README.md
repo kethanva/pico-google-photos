@@ -1,8 +1,16 @@
 # pico-google-photos
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+![Rust](https://img.shields.io/badge/Rust-1.75+-orange)
+![Platform](https://img.shields.io/badge/Platform-Raspberry%20Pi%20Zero%202%20W%20%2F%203%20%2F%204%20%2F%205-red)
+
 Rust-supervised Chromium kiosk that loads the **Google Photos mobile UI** on a Raspberry Pi — **no desktop environment, no X11**.
 
-Inspired by [pico-gallery](../pico-gallery). Where pico-gallery renders JPEGs directly to KMS/DRM, this project takes the opposite path: it spawns a tiny Wayland kiosk compositor ([Cage](https://github.com/cage-kiosk/cage)) and runs Chromium inside it. The mobile Google Photos UA is forced so the lightweight phone PWA is served instead of the desktop bundle.
+Repo: <https://github.com/kethanva/pico-google-photos>
+
+Inspired by [pico-gallery](https://github.com/kethanva/pico-gallery). Where pico-gallery renders JPEGs directly to KMS/DRM, this project takes the opposite path: it spawns a tiny Wayland kiosk compositor ([Cage](https://github.com/cage-kiosk/cage)) and runs Chromium inside it. The mobile Google Photos UA is forced so the lightweight phone PWA is served instead of the desktop bundle.
+
+---
 
 ## Target
 
@@ -10,11 +18,13 @@ Inspired by [pico-gallery](../pico-gallery). Where pico-gallery renders JPEGs di
 - **OS:** Raspberry Pi OS Bookworm (Lite is enough — no desktop needed).
 - **Display:** HDMI / DSI, direct KMS.
 
+---
+
 ## How it works
 
 ```
 systemd (tty7)
-  └─ pico-google-photos          (this binary — Rust supervisor)
+  └─ pico-google-photos          (Rust supervisor)
        └─ cage -s --             (Wayland kiosk compositor)
             └─ chromium-browser  (--kiosk --ozone-platform=wayland + mobile UA)
                  └─ photos.google.com  (mobile PWA)
@@ -22,9 +32,11 @@ systemd (tty7)
 
 The supervisor:
 - spawns `cage … -- chromium-browser …` as a single child,
-- restarts the session on crash,
-- optionally reloads on an interval,
+- restarts the session on crash (3-second backoff),
+- optionally reloads on a configurable interval,
 - turns the display off/on at scheduled times via `vcgencmd display_power`.
+
+---
 
 ## Install
 
@@ -37,14 +49,35 @@ cd pico-google-photos
 ```
 
 The installer:
-1. installs `cage`, `chromium-browser`, `seatd`, codecs, and runtime libs,
-2. builds the Rust supervisor (release-fast on low-RAM Pis),
-3. drops a config at `~/.config/pico-google-photos/config.toml`,
-4. enables `pico-google-photos.service` to start on boot.
+
+| Step | Action |
+|------|--------|
+| 1 | Detects architecture (`aarch64` / `armv7l` / `armv6l`) |
+| 2 | Detects RAM — switches to `release-fast` profile on <900 MB |
+| 3 | Installs `cage`, `chromium-browser`, `seatd`, codecs, runtime libs |
+| 4 | Installs Rust toolchain if missing |
+| 5 | Builds the supervisor and installs to `/usr/local/bin/pico-google-photos` |
+| 6 | Rewrites `pico-google-photos.service` for the invoking user + UID |
+| 7 | Adds user to `video`, `render`, `input`, `seat` groups |
+| 8 | Enables `seatd` and lingering for the user |
+| 9 | Seeds `~/.config/pico-google-photos/config.toml` |
+| 10 | Sets `gpu_mem=128` in `/boot/firmware/config.txt` (or `/boot/config.txt`) |
+| 11 | Enables `pico-google-photos.service` to run on boot |
+
+Environment overrides:
+
+```bash
+PICO_GP_PROFILE=release-fast ./install.sh   # force the fast-build profile
+PICO_GP_PROFILE=release      ./install.sh   # force the size-optimised profile
+```
+
+---
 
 ## First boot
 
-Chromium opens to `photos.google.com`, which redirects to the login screen. Sign in once — the profile persists at `~/.local/share/pico-google-photos/profile`. On every subsequent boot the kiosk drops straight into your library.
+Chromium opens straight to `photos.google.com`, which redirects to the Google login screen. Sign in once — the session cookies and profile persist at `~/.local/share/pico-google-photos/profile`. On every subsequent boot the kiosk drops directly into your library.
+
+---
 
 ## Config
 
@@ -77,35 +110,64 @@ off_time = "23:00"
 
 ### Tuning toggles
 
-| Toggle | True (default) | False |
+| Toggle | `true` (default) | `false` |
 |---|---|---|
-| `app_mode` | `--app=URL`, no chrome UI | bare URL, kiosk fullscreen |
-| `disable_gpu` | software render, no GL — safest on Pi Zero | GPU raster, ignore blocklist |
-| `ephemeral_cache` | disk cache → `/dev/null`, no SD writes | disk cache on disk (32 MB if `low_ram`) |
-| `low_ram` | `--process-per-site`, renderer cap 2, JS heap 128 MB | Chromium defaults |
+| `app_mode` | `--app=URL` — chromeless window, no address bar | bare URL, kiosk fullscreen |
+| `disable_gpu` | `--disable-gpu --disable-software-rasterizer` — software-rendered, safest on Pi Zero | GPU raster + ignore blocklist |
+| `ephemeral_cache` | `--disk-cache-dir=/dev/null` — zero SD-card writes | on-disk cache (32 MB when `low_ram`) |
+| `low_ram` | `--process-per-site`, renderer cap 2, JS heap 128 MB, `--disable-dev-shm-usage` | Chromium defaults |
 
-The default set matches the canonical "headless Pi Zero kiosk" recipe:
+### The default flag set
 
-```
-chromium-browser --kiosk --ozone-platform=wayland --enable-features=UseOzonePlatform \
+With every toggle on (factory default), the supervisor invokes Chromium with the canonical "headless Pi Zero kiosk" recipe:
+
+```bash
+chromium-browser \
+  --kiosk \
+  --ozone-platform=wayland \
+  --enable-features=UseOzonePlatform \
   --app=https://photos.google.com/ \
-  --user-agent="Mozilla/5.0 (Linux; Android 13; Pixel 5) ... Mobile Safari/537.36" \
-  --disable-gpu --disable-software-rasterizer --disable-dev-shm-usage \
+  --user-agent="Mozilla/5.0 (Linux; Android 13; Pixel 5) AppleWebKit/537.36 Chrome/120 Mobile Safari/537.36" \
+  --disable-gpu \
+  --disable-software-rasterizer \
+  --disable-dev-shm-usage \
   --disk-cache-dir=/dev/null \
-  --no-first-run --noerrdialogs --disable-session-crashed-bubble --process-per-site
+  --no-first-run \
+  --noerrdialogs \
+  --disable-session-crashed-bubble \
+  --process-per-site
 ```
 
-Flip `disable_gpu = false` on Pi 4 / Pi 5 to get hardware-accelerated scroll and decode.
+Inspect the exact argv any time:
+
+```bash
+pico-google-photos --print-args
+```
+
+### Pi 4 / Pi 5 tuning
+
+Flip `disable_gpu = false` to enable GPU raster, hardware video decode, and smoother grid scrolling. Keep `low_ram = false` on Pi 4 (2 GB+) for full renderer parallelism.
+
+```toml
+[browser]
+disable_gpu     = false
+low_ram         = false
+ephemeral_cache = false
+```
 
 ### Pi Zero 2 W tuning
 
-- Keep `low_ram = true` (cuts renderer count, caps the JS heap, shrinks caches).
+- Keep every toggle at its default (`true`).
 - `gpu_mem=128` is set automatically by the installer.
-- Boot from a fast SD card or USB SSD — Chromium cold-start is I/O bound.
+- Boot from a fast SD card or USB SSD — Chromium cold-start is I/O-bound.
+
+---
 
 ## Why the mobile UA?
 
-The desktop Google Photos bundle is heavy: large React tree, eager prefetch, multiple worker threads. The phone PWA is purpose-built for low-power devices — smaller JS payload, lazy image decode, simpler scroll virtualisation. Spoofing `Pixel 7 / Chrome Mobile` forces Google to serve that bundle. The result on a Pi Zero 2 W is roughly a 2–3× drop in steady-state RAM and a much smoother grid scroll.
+The desktop Google Photos bundle is heavy: large React tree, eager prefetch, multiple worker threads. The phone PWA is purpose-built for low-power devices — smaller JS payload, lazy image decode, simpler scroll virtualisation. Spoofing **Pixel 5 / Chrome Mobile** forces Google to serve that bundle. The result on a Pi Zero 2 W is roughly a 2–3× drop in steady-state RAM and a noticeably smoother grid scroll.
+
+---
 
 ## Commands
 
@@ -116,18 +178,76 @@ journalctl -u pico-google-photos.service -f
 # Restart
 sudo systemctl restart pico-google-photos.service
 
-# Inspect the exact Chromium argv the supervisor would use
+# Inspect the exact Chromium argv the supervisor would launch
 pico-google-photos --print-args
 
 # Override config path
 pico-google-photos --config /path/to/config.toml
 ```
 
+---
+
+## Development
+
+```bash
+# Clone
+git clone https://github.com/kethanva/pico-google-photos.git
+cd pico-google-photos
+
+# Build (host target — macOS/Linux dev box)
+cargo build
+
+# Lint
+cargo clippy --all-targets -- -W clippy::all
+
+# Cross-compile for Raspberry Pi (aarch64)
+rustup target add aarch64-unknown-linux-gnu
+cargo build --release --target aarch64-unknown-linux-gnu
+```
+
+The supervisor compiles and runs `--print-args` on any platform; spawning Cage + Chromium only works on Linux with the right packages installed.
+
+### Layout
+
+```
+pico-google-photos/
+├── Cargo.toml
+├── Cargo.lock              # committed for reproducible bin builds
+├── LICENSE
+├── README.md
+├── config.example.toml
+├── install.sh              # Raspberry Pi installer
+├── pico-google-photos.service
+└── src/
+    ├── main.rs             # CLI, signal loop, schedule gating
+    ├── config.rs           # TOML schema + defaults
+    ├── chromium.rs         # kiosk arg builder (toggle-driven)
+    ├── compositor.rs       # spawn Cage + Chromium as a single child
+    ├── display_power.rs    # vcgencmd display_power on/off
+    └── schedule.rs         # on/off-time window with cross-midnight wrap
+```
+
+---
+
+## Recent changes
+
+| Date | Change |
+|------|--------|
+| 2026-05-21 | **Initial public release.** Pixel-5 mobile UA, `app_mode`/`disable_gpu`/`ephemeral_cache`/`low_ram` toggles, Cage+Chromium supervision, schedule + reload loop. |
+| 2026-05-21 | Switched default UA from Pixel 7 to Pixel 5 (matches the canonical low-end kiosk recipe). |
+| 2026-05-21 | Added `app_mode` (`--app=URL`), `disable_gpu` (software render), `ephemeral_cache` (`--disk-cache-dir=/dev/null`). |
+| 2026-05-21 | Added MIT `LICENSE`. Committed `Cargo.lock` for reproducible binary builds. |
+
+---
+
 ## Acknowledgements
 
 - [pico-gallery](https://github.com/kethanva/pico-gallery) — display power schedule + installer patterns reused here.
 - [Cage](https://github.com/cage-kiosk/cage) — the kiosk compositor that makes "no X11" viable.
+- [Chromium](https://www.chromium.org/) — the browser engine doing all the actual work.
+
+---
 
 ## License
 
-MIT.
+MIT — see [LICENSE](LICENSE).
