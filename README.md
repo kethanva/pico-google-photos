@@ -15,8 +15,55 @@ Inspired by [pico-gallery](https://github.com/kethanva/pico-gallery). Where pico
 ## Target
 
 - **Hardware:** Raspberry Pi Zero 2 W / Pi 3 (or newer). Pi 4 / Pi 5 also fine.
-- **OS:** Raspberry Pi OS Bookworm (Lite is enough — no desktop needed).
+- **OS:** Raspberry Pi OS Lite (Bookworm, 64-bit) — see [Recommended OS](#recommended-os) below.
 - **Display:** HDMI / DSI, direct KMS.
+
+---
+
+## Recommended OS
+
+**Use Raspberry Pi OS Lite (Bookworm, 64-bit).** It is the smallest officially-supported image that ships everything `pico-google-photos` needs, with no desktop, no display manager, and no X server.
+
+Download: <https://www.raspberrypi.com/software/operating-systems/> → "Raspberry Pi OS Lite (64-bit)".
+
+| Why it wins on a Pi Zero 2 W |
+|------------------------------|
+| Boots to a TTY in ~12 s, idles around 130 MB RAM — leaves ~370 MB free for Chromium. |
+| 64-bit kernel — Zero 2 W's Cortex-A53 is 64-bit native; 32-bit ABI wastes cycles. |
+| `cage`, `chromium-browser`, `seatd`, `libdrm`, `libgbm`, `libgles2` all in apt — no manual builds. |
+| Ships `vcgencmd` for HDMI on/off scheduling. |
+| KMS/DRM is the default video stack — no fakeKMS, no `Xorg`, no overlays to disable. |
+| `gpu_mem` and `dtoverlay=vc4-kms-v3d` honoured by `/boot/firmware/config.txt`. |
+
+### Why not the alternatives
+
+| OS | Idle RAM | Verdict |
+|----|---------|---------|
+| **Raspberry Pi OS Lite 64-bit (Bookworm)** | ~130 MB | **Recommended.** Best Cage + Chromium support, smallest official image. |
+| Raspberry Pi OS Lite 32-bit | ~120 MB | Works but loses 64-bit perf on Zero 2 W. Pick only if forced (Pi Zero W / Pi 1). |
+| Raspberry Pi OS *with desktop* | ~400 MB | Wastes RAM on LXDE you never see. Don't. |
+| DietPi (Bookworm) | ~60 MB | Lightest option — viable for power users. Install `cage` + `chromium` via `dietpi-software`. Less tested with this project. |
+| Ubuntu Server 24.04 (arm64) | ~200 MB | Heavier base; Chromium ships as snap which doesn't work in Cage. Skip. |
+| Alpine Linux (aarch64) | ~40 MB | Smallest, but Chromium support on aarch64 musl is patchy and `vcgencmd` is unavailable. Not recommended. |
+| Buildroot custom | <30 MB | Theoretical minimum — high maintenance, you'd lose `apt`. Only for embedded shops. |
+
+### First-flash checklist (Raspberry Pi OS Lite 64-bit)
+
+1. Flash with **Raspberry Pi Imager**. In the customisation pane:
+   - Set hostname (e.g. `photo-frame`).
+   - Enable SSH with a key.
+   - Set Wi-Fi SSID + password (Zero 2 W has no Ethernet).
+   - Set locale and timezone.
+2. Boot, SSH in, then:
+   ```bash
+   sudo apt-get update && sudo apt-get -y full-upgrade
+   sudo apt-get install -y git
+   git clone https://github.com/kethanva/pico-google-photos.git
+   cd pico-google-photos
+   ./install.sh
+   sudo reboot
+   ```
+3. After reboot the kiosk auto-launches on `tty7`. SSH back in once to sign into Google.
 
 ---
 
