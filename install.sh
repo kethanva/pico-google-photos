@@ -124,31 +124,76 @@ done
 # unmask it because PAMName=login -> pam_systemd needs logind, otherwise it
 # corrupts XDG_RUNTIME_DIR and cage fails with "Unable to open Wayland socket:
 # Invalid argument".
-if systemctl is-enabled systemd-logind 2>&1 | grep -q masked; then
-  warn "systemd-logind is masked (DietPi default). Unmasking."
-  sudo systemctl unmask systemd-logind || true
+#
+# Always attempt unmask (no-op if already unmasked). Cover both persistent
+# (/etc) and runtime (/run) mask locations because `systemctl unmask` only
+# touches one path depending on systemd version + reporting state.
+LOGIND_STATE=$(systemctl is-enabled systemd-logind 2>&1 || true)
+info "systemd-logind state: ${LOGIND_STATE}"
+sudo systemctl unmask systemd-logind 2>/dev/null || true
+
+# Manual mask cleanup — symlinks to /dev/null that systemctl unmask sometimes misses.
+for MASK_PATH in \
+  /etc/systemd/system/systemd-logind.service \
+  /run/systemd/system/systemd-logind.service
+do
+  if [[ -L "$MASK_PATH" ]]; then
+    TARGET=$(readlink "$MASK_PATH")
+    if [[ "$TARGET" == "/dev/null" ]]; then
+      warn "Removing /dev/null mask symlink: $MASK_PATH"
+      sudo rm -f "$MASK_PATH"
+    fi
+  fi
+done
+
+sudo systemctl daemon-reload
+
+# Verify unmask worked. If still masked, we cannot proceed cleanly.
+LOGIND_STATE_AFTER=$(systemctl is-enabled systemd-logind 2>&1 || true)
+if echo "$LOGIND_STATE_AFTER" | grep -qi masked; then
+  warn "systemd-logind still reports: ${LOGIND_STATE_AFTER}"
+  warn "Continuing anyway. Cage may fail. Manual fix:"
+  warn "  sudo rm -f /etc/systemd/system/systemd-logind.service"
+  warn "  sudo rm -f /run/systemd/system/systemd-logind.service"
+  warn "  sudo systemctl daemon-reload"
+else
+  info "systemd-logind unmasked: ${LOGIND_STATE_AFTER}"
 fi
 
-# Stale logind symlink that breaks loginctl with "File exists".
-STALE_LINK="/etc/systemd/system/dbus-org.freedesktop.login1.service"
-if [[ -L "$STALE_LINK" && ! -e "$STALE_LINK" ]]; then
-  warn "Removing dangling logind symlink: $STALE_LINK"
-  sudo rm -f "$STALE_LINK"
-fi
+# Force-clean the dbus alias symlink that breaks logind with:
+#   "Unit dbus-org.freedesktop.login1.service failed to load properly: File exists"
+# This file is supposed to be a symlink to /lib/systemd/system/systemd-logind.service.
+# On DietPi / minimal images it may exist as a regular file, wrong-target symlink,
+# or be left over from a previously-masked logind. Remove unconditionally and let
+# `systemctl reenable systemd-logind` recreate it from the unit's [Install] Alias=.
+for ALIAS_LINK in \
+  /etc/systemd/system/dbus-org.freedesktop.login1.service \
+  /etc/systemd/system/multi-user.target.wants/dbus-org.freedesktop.login1.service
+do
+  if [[ -e "$ALIAS_LINK" || -L "$ALIAS_LINK" ]]; then
+    warn "Removing stale logind alias: $ALIAS_LINK"
+    sudo rm -f "$ALIAS_LINK"
+  fi
+done
 
 sudo systemctl daemon-reload
 sudo systemctl enable dbus              || true
 sudo systemctl start  dbus              || true
-sudo systemctl enable systemd-logind    || true
-sudo systemctl restart systemd-logind   || true
+
+# Reenable recreates the alias symlink properly from [Install] Alias= directive.
+sudo systemctl reenable systemd-logind  || sudo systemctl enable systemd-logind || true
+sudo systemctl restart  systemd-logind  || true
+
 sudo systemctl enable seatd.service     || true
 sudo systemctl start  seatd.service     || true
 
-# loginctl needs logind on the bus — retry once after restart.
+# loginctl needs logind on the bus — give it a moment, then try.
 # Non-fatal: with RuntimeDirectory=cage in the unit, linger is defense-in-depth.
+sleep 1
 if ! sudo loginctl enable-linger "$TTY_USER" 2>/dev/null; then
-  warn "enable-linger failed; reloading and retrying"
+  warn "enable-linger failed; daemon-reexec and retry"
   sudo systemctl daemon-reexec || true
+  sleep 1
   sudo loginctl enable-linger "$TTY_USER" \
     || warn "enable-linger still failing (non-fatal — RuntimeDirectory=cage handles runtime dir)"
 fi
