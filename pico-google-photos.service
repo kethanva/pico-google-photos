@@ -20,6 +20,8 @@ StandardError=journal
 RuntimeDirectory=cage
 RuntimeDirectoryMode=0700
 Environment=XDG_RUNTIME_DIR=/run/cage
+Environment=WLR_BACKENDS=drm
+Environment=WLR_NO_HARDWARE_CURSORS=1
 Environment=WLR_LIBINPUT_NO_DEVICES=1
 Environment=RUST_LOG=info
 ExecStartPre=-/bin/sleep 5

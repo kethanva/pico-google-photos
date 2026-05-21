@@ -10,7 +10,11 @@ REPO="kethanva/pico-google-photos"
 BIN_NAME="pico-google-photos"
 INSTALL_BIN="/usr/local/bin/${BIN_NAME}"
 SERVICE_NAME="pico-google-photos.service"
-CONFIG_DIR="${HOME}/.config/pico-google-photos"
+# Resolve actual end-user (not root) so config lands in their home, not /root.
+TTY_USER="${SUDO_USER:-$USER}"
+TTY_HOME=$(getent passwd "$TTY_USER" | cut -d: -f6)
+[[ -n "$TTY_HOME" && -d "$TTY_HOME" ]] || TTY_HOME="${HOME}"
+CONFIG_DIR="${TTY_HOME}/.config/pico-google-photos"
 CONFIG_FILE="${CONFIG_DIR}/config.toml"
 ASSET_URL_BASE="https://github.com/${REPO}/releases/latest/download"
 
@@ -102,7 +106,7 @@ section "Installing binary"
 sudo install -Dm755 "${EXTRACT_DIR}/${BIN_NAME}" "$INSTALL_BIN"
 
 section "Installing systemd service"
-TTY_USER="${SUDO_USER:-$USER}"
+info "Service user: ${TTY_USER}  (home: ${TTY_HOME})"
 TMP_UNIT=$(mktemp)
 # Service file in the release tarball is already correct (After=/Requires=
 # dbus, RuntimeDirectory=cage, etc.). Only the user account differs per host.
@@ -116,8 +120,16 @@ for g in video render input seat; do
   sudo usermod -aG "$g" "$TTY_USER" || true
 done
 
-# Clear stale logind symlink that breaks `loginctl enable-linger` with
-# "Unit dbus-org.freedesktop.login1.service failed to load properly: File exists"
+# DietPi (and other minimal images) mask systemd-logind by default. We must
+# unmask it because PAMName=login -> pam_systemd needs logind, otherwise it
+# corrupts XDG_RUNTIME_DIR and cage fails with "Unable to open Wayland socket:
+# Invalid argument".
+if systemctl is-enabled systemd-logind 2>&1 | grep -q masked; then
+  warn "systemd-logind is masked (DietPi default). Unmasking."
+  sudo systemctl unmask systemd-logind || true
+fi
+
+# Stale logind symlink that breaks loginctl with "File exists".
 STALE_LINK="/etc/systemd/system/dbus-org.freedesktop.login1.service"
 if [[ -L "$STALE_LINK" && ! -e "$STALE_LINK" ]]; then
   warn "Removing dangling logind symlink: $STALE_LINK"
@@ -133,10 +145,12 @@ sudo systemctl enable seatd.service     || true
 sudo systemctl start  seatd.service     || true
 
 # loginctl needs logind on the bus — retry once after restart.
+# Non-fatal: with RuntimeDirectory=cage in the unit, linger is defense-in-depth.
 if ! sudo loginctl enable-linger "$TTY_USER" 2>/dev/null; then
-  warn "First enable-linger failed; reloading and retrying"
+  warn "enable-linger failed; reloading and retrying"
   sudo systemctl daemon-reexec || true
-  sudo loginctl enable-linger "$TTY_USER" || warn "enable-linger still failing (non-fatal)"
+  sudo loginctl enable-linger "$TTY_USER" \
+    || warn "enable-linger still failing (non-fatal — RuntimeDirectory=cage handles runtime dir)"
 fi
 
 section "Seeding config"
