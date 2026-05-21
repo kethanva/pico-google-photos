@@ -31,6 +31,11 @@ command -v apt-get &>/dev/null || die "apt-get required (Raspberry Pi OS / Debia
 command -v curl    &>/dev/null || die "curl required."
 command -v tar     &>/dev/null || die "tar required."
 
+section "Resolving release version"
+VERSION=$(curl -sI "https://github.com/${REPO}/releases/latest" | awk -F'/' '/[Ll]ocation:/{print $NF}' | tr -d '\r\n')
+VERSION="${VERSION:-latest}"
+info "Installing pico-google-photos version: ${VERSION}"
+
 ARCH=$(uname -m)
 case "$ARCH" in
   aarch64) ASSET="pico-google-photos-aarch64-linux-gnu.tar.gz" ;;
@@ -156,5 +161,6 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now "$SERVICE_NAME"
 sudo systemctl --no-pager status "$SERVICE_NAME" || true
 
-info "Done. Logs: journalctl -u ${SERVICE_NAME} -f"
+info "Done. pico-google-photos version ${VERSION} installed successfully."
+info "Logs: journalctl -u ${SERVICE_NAME} -f"
 info "First boot: Chromium will prompt for Google login. Sign in once; profile persists."
