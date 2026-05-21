@@ -1,15 +1,14 @@
 [Unit]
 Description=pico-google-photos kiosk (Cage + Chromium)
-After=network-online.target systemd-user-sessions.service dbus.service seatd.service
+After=network-online.target dbus.service seatd.service
 Wants=network-online.target
-Requires=dbus.service
+Requires=dbus.service seatd.service
 
 [Service]
 Type=simple
 User=pi
 Group=video
-SupplementaryGroups=video render input seat
-PAMName=login
+SupplementaryGroups=video render input seat _seatd tty
 TTYPath=/dev/tty7
 TTYReset=yes
 TTYVHangup=yes
