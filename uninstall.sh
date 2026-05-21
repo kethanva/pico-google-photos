@@ -28,6 +28,9 @@ else
   warn "Service not found, skipping."
 fi
 
+section "Restoring getty@tty7"
+sudo systemctl unmask getty@tty7.service 2>/dev/null || true
+
 section "Removing binary"
 if [[ -f "$INSTALL_BIN" ]]; then
   sudo rm -f "$INSTALL_BIN"

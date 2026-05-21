@@ -135,6 +135,15 @@ sudo systemctl start  dbus          || true
 sudo systemctl enable seatd.service || true
 sudo systemctl start  seatd.service || true
 
+# Free tty7 — getty races for the VT and blocks Cage from binding the seat.
+sudo systemctl disable --now getty@tty7.service 2>/dev/null || true
+sudo systemctl mask          getty@tty7.service 2>/dev/null || true
+
+# Ensure boot reaches multi-user.target (DietPi headless default). Without
+# this, on hosts where a previous DM left graphical.target as default but the
+# DM is now removed, boot can stall before reaching our unit.
+sudo systemctl set-default multi-user.target >/dev/null 2>&1 || true
+
 section "Seeding config"
 if [[ ! -f "$CONFIG_FILE" ]]; then
   mkdir -p "$CONFIG_DIR"

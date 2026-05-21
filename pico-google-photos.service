@@ -1,8 +1,8 @@
 [Unit]
 Description=pico-google-photos kiosk (Cage + Chromium)
-After=network-online.target dbus.service seatd.service
-Wants=network-online.target
-Requires=dbus.service seatd.service
+After=network.target dbus.service seatd.service systemd-user-sessions.service getty@tty7.service
+Wants=network.target dbus.service seatd.service
+Conflicts=getty@tty7.service
 
 [Service]
 Type=simple
@@ -24,9 +24,10 @@ Environment=WLR_NO_HARDWARE_CURSORS=1
 Environment=WLR_LIBINPUT_NO_DEVICES=1
 Environment=RUST_LOG=info
 ExecStartPre=-/bin/sleep 5
+ExecStartPre=-/bin/sh -c 'rm -f "$HOME"/.local/share/pico-google-photos/profile/Singleton* "$HOME"/.config/pico-google-photos/profile/Singleton* 2>/dev/null; true'
 ExecStart=/usr/local/bin/pico-google-photos
-Restart=on-failure
-RestartSec=10
+Restart=always
+RestartSec=5
 
 [Install]
 WantedBy=multi-user.target
