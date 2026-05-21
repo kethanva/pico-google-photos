@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # ============================================================
 # pico-google-photos installer — Raspberry Pi (no X11, no DE)
+# Downloads prebuilt binary from GitHub Releases.
 # Uses Cage (Wayland kiosk) + Chromium, supervised by Rust.
 # ============================================================
 set -euo pipefail
@@ -11,6 +12,7 @@ INSTALL_BIN="/usr/local/bin/${BIN_NAME}"
 SERVICE_NAME="pico-google-photos.service"
 CONFIG_DIR="${HOME}/.config/pico-google-photos"
 CONFIG_FILE="${CONFIG_DIR}/config.toml"
+ASSET_URL_BASE="https://github.com/${REPO}/releases/latest/download"
 
 BOLD='\033[1m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; RED='\033[0;31m'
 CYAN='\033[0;36m'; RESET='\033[0m'
@@ -20,85 +22,92 @@ die()     { echo -e "${RED}[x]${RESET} $*" >&2; exit 1; }
 section() { echo -e "\n${BOLD}${CYAN}== $* ==${RESET}"; }
 
 [[ "$(uname -s)" == "Linux" ]] || die "Linux only."
-command -v sudo  &>/dev/null || die "sudo required."
+command -v sudo    &>/dev/null || die "sudo required."
 command -v apt-get &>/dev/null || die "apt-get required (Raspberry Pi OS / Debian)."
+command -v curl    &>/dev/null || die "curl required."
+command -v tar     &>/dev/null || die "tar required."
 
 ARCH=$(uname -m)
 case "$ARCH" in
-  aarch64) RUST_TARGET="aarch64-unknown-linux-gnu" ;;
-  armv7l)  RUST_TARGET="armv7-unknown-linux-gnueabihf" ;;
-  armv6l)  RUST_TARGET="arm-unknown-linux-gnueabihf" ;;
+  aarch64) ASSET="pico-google-photos-aarch64-linux-gnu.tar.gz" ;;
+  armv7l)  ASSET="pico-google-photos-armv7-linux-gnueabihf.tar.gz" ;;
+  armv6l)  ASSET="pico-google-photos-armv6-linux-gnueabihf.tar.gz" ;;
   *)       die "Unsupported arch: $ARCH" ;;
 esac
 
-MEM_KB=$(awk '/MemTotal/ {print $2; exit}' /proc/meminfo 2>/dev/null || echo 0)
-MEM_MB=$(( MEM_KB / 1024 ))
-PROFILE="${PICO_GP_PROFILE:-release}"
-if [[ "$MEM_MB" -lt 900 ]] && [[ "$PROFILE" == "release" ]]; then
-  warn "Low RAM (${MEM_MB} MB) — switching to release-fast profile."
-  PROFILE="release-fast"
-fi
+ASSET_URL="${ASSET_URL_BASE}/${ASSET}"
 
 section "Installing system dependencies"
 sudo apt-get update -y
 
-# Bookworm renamed `chromium-browser` to `chromium`. Try the new name first,
-# fall back to the old name for Bullseye / Buster.
+# Bookworm renamed `chromium-browser` to `chromium`. Try new name first,
+# fall back to old name for Bullseye / Buster.
 if apt-cache show chromium >/dev/null 2>&1; then
   CHROMIUM_PKG="chromium"
 elif apt-cache show chromium-browser >/dev/null 2>&1; then
   CHROMIUM_PKG="chromium-browser"
 else
-  die "Neither 'chromium' nor 'chromium-browser' is available in apt. Update your sources."
+  die "Neither 'chromium' nor 'chromium-browser' available in apt. Update sources."
 fi
 info "Chromium package: ${CHROMIUM_PKG}"
 
-# Codec package follows the same rename on most images.
 CODEC_PKG=""
 if apt-cache show chromium-codecs-ffmpeg-extra >/dev/null 2>&1; then
   CODEC_PKG="chromium-codecs-ffmpeg-extra"
-elif apt-cache show "${CHROMIUM_PKG}-l10n" >/dev/null 2>&1; then
-  CODEC_PKG=""  # Bookworm bundles codecs in the main chromium package
 fi
 
-# `seat` group ships with seatd on Bookworm; libseat1 is the runtime.
 sudo apt-get install -y --no-install-recommends \
   cage "${CHROMIUM_PKG}" ${CODEC_PKG} \
   seatd libseat1 libinput10 libdrm2 libgbm1 libegl1 libgles2 \
-  fonts-noto-color-emoji ca-certificates curl dbus
+  fonts-noto-color-emoji ca-certificates curl \
+  dbus dbus-user-session libpam-systemd
 
-# Resolve the actual installed binary name and record it for the config seed.
+# Resolve installed chromium binary name for config seed.
 if command -v chromium >/dev/null 2>&1; then
   CHROMIUM_BIN="chromium"
 elif command -v chromium-browser >/dev/null 2>&1; then
   CHROMIUM_BIN="chromium-browser"
 else
-  die "Chromium installed but neither 'chromium' nor 'chromium-browser' is on PATH."
+  die "Chromium installed but neither 'chromium' nor 'chromium-browser' on PATH."
 fi
 info "Chromium binary: ${CHROMIUM_BIN}"
 
-if ! command -v cargo &>/dev/null; then
-  section "Installing Rust toolchain"
-  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
-    | sh -s -- -y --default-toolchain stable --profile minimal
-  # shellcheck disable=SC1091
-  source "$HOME/.cargo/env"
+section "Downloading latest release asset"
+WORK_DIR=$(mktemp -d)
+trap 'rm -rf "$WORK_DIR"' EXIT
+TAR_PATH="${WORK_DIR}/${ASSET}"
+info "URL: ${ASSET_URL}"
+curl -fL --retry 3 --retry-delay 2 -o "$TAR_PATH" "$ASSET_URL" \
+  || die "Download failed. Check release exists at https://github.com/${REPO}/releases"
+
+# Verify checksum if .sha256 is available alongside.
+SHA_URL="${ASSET_URL}.sha256"
+if curl -fLs -o "${TAR_PATH}.sha256" "$SHA_URL"; then
+  EXPECTED=$(awk '{print $1}' "${TAR_PATH}.sha256")
+  ACTUAL=$(sha256sum "$TAR_PATH" | awk '{print $1}')
+  [[ "$EXPECTED" == "$ACTUAL" ]] || die "Checksum mismatch (expected $EXPECTED, got $ACTUAL)"
+  info "Checksum OK: ${ACTUAL:0:12}…"
+else
+  warn "No .sha256 published; skipping checksum verification."
 fi
 
-section "Building ${BIN_NAME} (profile: ${PROFILE})"
-cargo build --profile "$PROFILE" --target "$RUST_TARGET"
-BUILT_BIN="target/${RUST_TARGET}/${PROFILE}/${BIN_NAME}"
-[[ -f "$BUILT_BIN" ]] || die "Build did not produce ${BUILT_BIN}"
+section "Extracting"
+EXTRACT_DIR="${WORK_DIR}/extracted"
+mkdir -p "$EXTRACT_DIR"
+tar -C "$EXTRACT_DIR" -xzf "$TAR_PATH"
+[[ -f "${EXTRACT_DIR}/${BIN_NAME}" ]] || die "Archive missing ${BIN_NAME}"
+[[ -f "${EXTRACT_DIR}/${SERVICE_NAME}" ]] || die "Archive missing ${SERVICE_NAME}"
 
 section "Installing binary"
-sudo install -Dm755 "$BUILT_BIN" "$INSTALL_BIN"
+sudo install -Dm755 "${EXTRACT_DIR}/${BIN_NAME}" "$INSTALL_BIN"
 
 section "Installing systemd service"
 TTY_USER="${SUDO_USER:-$USER}"
 TMP_UNIT=$(mktemp)
+# Service file in the release tarball is already correct (After=/Requires=
+# dbus, RuntimeDirectory=cage, etc.). Only the user account differs per host.
 sed -e "s/^User=pi$/User=${TTY_USER}/" \
-    -e "s|XDG_RUNTIME_DIR=/run/user/1000|XDG_RUNTIME_DIR=/run/user/$(id -u "$TTY_USER")|" \
-    pico-google-photos.service > "$TMP_UNIT"
+    "${EXTRACT_DIR}/${SERVICE_NAME}" > "$TMP_UNIT"
 sudo install -Dm644 "$TMP_UNIT" "/etc/systemd/system/${SERVICE_NAME}"
 rm -f "$TMP_UNIT"
 
@@ -106,19 +115,37 @@ for g in video render input seat; do
   sudo getent group "$g" >/dev/null 2>&1 || sudo groupadd -r "$g"
   sudo usermod -aG "$g" "$TTY_USER" || true
 done
-sudo loginctl enable-linger "$TTY_USER" || true
-sudo systemctl enable dbus || true
-sudo systemctl start dbus || true
-sudo systemctl enable seatd.service || true
-sudo systemctl start  seatd.service || true
+
+# Clear stale logind symlink that breaks `loginctl enable-linger` with
+# "Unit dbus-org.freedesktop.login1.service failed to load properly: File exists"
+STALE_LINK="/etc/systemd/system/dbus-org.freedesktop.login1.service"
+if [[ -L "$STALE_LINK" && ! -e "$STALE_LINK" ]]; then
+  warn "Removing dangling logind symlink: $STALE_LINK"
+  sudo rm -f "$STALE_LINK"
+fi
+
+sudo systemctl daemon-reload
+sudo systemctl enable dbus              || true
+sudo systemctl start  dbus              || true
+sudo systemctl enable systemd-logind    || true
+sudo systemctl restart systemd-logind   || true
+sudo systemctl enable seatd.service     || true
+sudo systemctl start  seatd.service     || true
+
+# loginctl needs logind on the bus — retry once after restart.
+if ! sudo loginctl enable-linger "$TTY_USER" 2>/dev/null; then
+  warn "First enable-linger failed; reloading and retrying"
+  sudo systemctl daemon-reexec || true
+  sudo loginctl enable-linger "$TTY_USER" || warn "enable-linger still failing (non-fatal)"
+fi
 
 section "Seeding config"
 if [[ ! -f "$CONFIG_FILE" ]]; then
   mkdir -p "$CONFIG_DIR"
-  # Substitute the resolved chromium binary name into the seeded config so the
-  # supervisor doesn't try to exec a non-existent `chromium-browser` on Bookworm.
+  CONFIG_TEMPLATE="${EXTRACT_DIR}/config.example.toml"
+  [[ -f "$CONFIG_TEMPLATE" ]] || die "Archive missing config.example.toml"
   sed -e "s|^chromium_binary.*|chromium_binary   = \"${CHROMIUM_BIN}\"|" \
-      config.example.toml > "$CONFIG_FILE"
+      "$CONFIG_TEMPLATE" > "$CONFIG_FILE"
   info "Wrote ${CONFIG_FILE} (chromium_binary=${CHROMIUM_BIN})"
 else
   warn "Config exists; leaving as-is: ${CONFIG_FILE}"

@@ -1,0 +1,105 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to publish (e.g. v0.1.0)"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: build ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: aarch64-unknown-linux-gnu
+            asset: pico-google-photos-aarch64-linux-gnu.tar.gz
+          - target: armv7-unknown-linux-gnueabihf
+            asset: pico-google-photos-armv7-linux-gnueabihf.tar.gz
+          - target: arm-unknown-linux-gnueabihf
+            asset: pico-google-photos-armv6-linux-gnueabihf.tar.gz
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install cross
+        run: cargo install cross --locked --version 0.2.5
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: cross-${{ matrix.target }}-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build (release)
+        run: cross build --profile release --target ${{ matrix.target }} --locked
+
+      - name: Stage artifact
+        run: |
+          mkdir -p dist
+          BIN="target/${{ matrix.target }}/release/pico-google-photos"
+          test -f "$BIN" || { echo "missing $BIN"; exit 1; }
+          cp "$BIN"                          dist/pico-google-photos
+          cp pico-google-photos.service      dist/
+          cp install.sh                      dist/
+          cp config.example.toml             dist/
+          cp README.md LICENSE               dist/ 2>/dev/null || true
+          tar -C dist -czf "${{ matrix.asset }}" .
+          sha256sum "${{ matrix.asset }}" > "${{ matrix.asset }}.sha256"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset }}
+          path: |
+            ${{ matrix.asset }}
+            ${{ matrix.asset }}.sha256
+
+  release:
+    name: publish release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Resolve tag
+        id: tag
+        run: |
+          if [ -n "${{ inputs.tag }}" ]; then
+            echo "name=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "name=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create / update GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.name }}
+          name: ${{ steps.tag.outputs.name }}
+          files: |
+            artifacts/*.tar.gz
+            artifacts/*.sha256
+          generate_release_notes: true
+          fail_on_unmatched_files: true

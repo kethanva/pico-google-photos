@@ -17,7 +17,9 @@ TTYVTDisallocate=yes
 StandardInput=tty
 StandardOutput=journal
 StandardError=journal
-Environment=XDG_RUNTIME_DIR=/run/user/1000
+RuntimeDirectory=cage
+RuntimeDirectoryMode=0700
+Environment=XDG_RUNTIME_DIR=/run/cage
 Environment=WLR_LIBINPUT_NO_DEVICES=1
 Environment=RUST_LOG=info
 ExecStartPre=-/bin/sleep 5
