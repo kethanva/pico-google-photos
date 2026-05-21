@@ -1,6 +1,6 @@
 [package]
 name        = "pico-google-photos"
-version     = "0.1.4"
+version     = "0.1.5"
 edition     = "2021"
 description = "Headless Chromium kiosk loading Google Photos mobile UI on Raspberry Pi (no desktop, no X11)"
 license     = "MIT"
