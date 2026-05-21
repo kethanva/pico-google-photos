@@ -1,7 +1,8 @@
 [Unit]
 Description=pico-google-photos kiosk (Cage + Chromium)
-After=network-online.target systemd-user-sessions.service
+After=network-online.target systemd-user-sessions.service dbus.service seatd.service
 Wants=network-online.target
+Requires=dbus.service
 
 [Service]
 Type=simple
@@ -19,7 +20,7 @@ StandardError=journal
 Environment=XDG_RUNTIME_DIR=/run/user/1000
 Environment=WLR_LIBINPUT_NO_DEVICES=1
 Environment=RUST_LOG=info
-ExecStartPre=/bin/sleep 5
+ExecStartPre=-/bin/sleep 5
 ExecStart=/usr/local/bin/pico-google-photos
 Restart=on-failure
 RestartSec=10

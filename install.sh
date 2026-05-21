@@ -65,7 +65,7 @@ fi
 sudo apt-get install -y --no-install-recommends \
   cage "${CHROMIUM_PKG}" ${CODEC_PKG} \
   seatd libseat1 libinput10 libdrm2 libgbm1 libegl1 libgles2 \
-  fonts-noto-color-emoji ca-certificates curl
+  fonts-noto-color-emoji ca-certificates curl dbus
 
 # Resolve the actual installed binary name and record it for the config seed.
 if command -v chromium >/dev/null 2>&1; then
@@ -102,8 +102,13 @@ sed -e "s/^User=pi$/User=${TTY_USER}/" \
 sudo install -Dm644 "$TMP_UNIT" "/etc/systemd/system/${SERVICE_NAME}"
 rm -f "$TMP_UNIT"
 
-sudo usermod -aG video,render,input,seat "$TTY_USER" || true
+for g in video render input seat; do
+  sudo getent group "$g" >/dev/null 2>&1 || sudo groupadd -r "$g"
+  sudo usermod -aG "$g" "$TTY_USER" || true
+done
 sudo loginctl enable-linger "$TTY_USER" || true
+sudo systemctl enable dbus || true
+sudo systemctl start dbus || true
 sudo systemctl enable seatd.service || true
 sudo systemctl start  seatd.service || true
 
